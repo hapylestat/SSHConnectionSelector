@@ -1,69 +1,70 @@
 
+#!/usr/bin/env powershell
+
 $scriptPath = split-path -parent $MyInvocation.MyCommand.Definition
 $cfgName = [io.path]::GetFileNameWithoutExtension($MyInvocation.MyCommand.Name)
 
+
+class Colors {
+    static [string] $fontColor = $host.UI.RawUI.ForegroundColor
+    static [string] $backColor = $host.UI.RawUI.BackgroundColor
+    static [string] $groupColor = "Magenta"   
+}
+
 class EnvVar {
-    [string] $Name
-    [string] $Value
+    [string] $Name; [string] $Value
 
     EnvVar([string]$Name, [string]$Value) {
-        $this.Name = $Name
-        $this.Value = $Value
+        $this.Name, $this.Value = $Name, $Value
+    }
+
+    static [EnvVar[]] parse([Array] $env) {
+        $vars = [System.Collections.ArrayList]@()
+        foreach($_env in $env) {
+            [void]$vars.Add([EnvVar]::new($_env.name, $_env.value))
+        }
+        return $vars
     }
 }
 
 class SSHRecord {
-    [string] $Title
+    [string] $Title; [string] $Group; [string] $User; [string] $_Host; [string] $Port; [string] $keyPath
     [int] $TitleLen
-    [string] $Group
-    [string] $User
-    [string] $_Host
-    [string] $Port
-    [string] $keyPath
     [System.Array] $_Env
     
     SSHRecord([string] $Title, [string] $User, [string] $Group, [string] $_Host, [string] $Port, [string] $keyPath, [System.Array] $_Env) {
-        $this.Title = $Title
-        $this.User = $User
-        $this.Group = $Group
-        $this._Host = $_Host
-        $this.Port = $Port
-        $this.keyPath = $keyPath
-        $this._Env = $_Env
+        $this.Title, $this.User, $this.Group, $this._Host, $this.Port, $this.keyPath, $this._Env =
+            $Title, $User, $Group, $_Host, $Port, $keyPath, $_Env
         $this.TitleLen = $Title.Length
     }
 }
 
-class ConfMeta {
+class Conf {
     [string] $Title
-    [int] $MaxMenuWidth
-    [int] $MaxGroupWidth
+    [int] $MaxMenuWidth; [int] $MaxGroupWidth
+    [SSHRecord[]] $Records
 
-    ConfMeta([string] $Title, [int]$MaxMenuWidth, [int]$MaxGroupWidth) {
+    Conf([string] $Title, [int]$MaxMenuWidth, [int]$MaxGroupWidth, [SSHRecord[]] $records) {
         $this.Title = $Title
-        $this.MaxMenuWidth = $MaxMenuWidth
-        $this.MaxGroupWidth = $MaxGroupWidth
+        $this.MaxMenuWidth, $this.MaxGroupWidth = $MaxMenuWidth, $MaxGroupWidth
+        $this.Records = $records
+    }
+
+    static [Conf] parse([string] $Title, [Array] $records) {
+        $sshRecords = [System.Collections.ArrayList]@()
+        $counters = @(0, 0)  # index, menu_len, group_len
+        foreach ($record in $records) {
+            $sshRecords.Add([SSHRecord]::new($record.title, $record.user, $record.group, $record._host, $record.port, $record.keyPath, [EnvVar]::parse($record.env)))
+            if ($record.title.length -gt $counters[0]++) { $counters[0] = $record.title.length }
+            if ($record.group.length -gt $counters[1]++){ $counters[1] = $record.group.length}
+        }
+        return [Conf]::new($Title, $counters[0], $counters[1], $sshRecords)
     }
 }
 
 function loadConfig([string] $scriptPath) {
-    $_path = [string]::Format("{0}/{1}.xml", $scriptPath, $cfgName)
-    $xml = [xml](Get-Content -Path $_path)
-    $cfg = [ordered]@{}
-    $index = 0
-    $_max_menu_len = 0
-    $_max_group_len = 0
-    foreach ($record in $xml.SSHRecords.record) {
-        $vars = [System.Collections.ArrayList]@()
-        foreach($_env in $record.env) {
-            [void]$vars.Add([EnvVar]::new($_env.name, $_env.value))
-        }
-        $cfg[$index.ToString()] = [SSHRecord]::new($record.title, $record.user, $record.group, $record._host, $record.port, $record.keyPath, $vars)
-        $index++
-        if ($record.title.length -gt $_max_menu_len) { $_max_menu_len = $record.title.length }
-        if ($record.group.length -gt $_max_group_len){ $_max_group_len = $record.group.length}
-    }
-    return [ConfMeta]::new($xml.SSHRecords.title, $_max_menu_len, $_max_group_len), $cfg
+    $xml = [xml](Get-Content -Path $([string]::Format("{0}/{1}.xml", $scriptPath, $cfgName)))       
+    return [Conf]::parse($xml.SSHRecords.title, $xml.SSHRecords.record)
 }
 
 function moveCursor{ param($position)
@@ -71,61 +72,55 @@ function moveCursor{ param($position)
 }
 
 function RedrawMenuItems{ 
-    param ([SSHRecord[]]$menuItems, [ConfMeta]$meta, $oldMenuPos=0, $menuPosition=0, $currPos)
-    
+    param ([Conf]$cfg, $oldMenuPos=0, $menuPosition=0, $currPos)
+
+    $menuItems = $cfg.Records
     # +1 comes from leading new line in the menu
-    $menuLen = $menuItems.Count + 1
-    $fcolor = $host.UI.RawUI.ForegroundColor
-    $bcolor = $host.UI.RawUI.BackgroundColor
-    $gcolor = "DarkGray"
-    
+    $menuLen = $menuItems.Count + 1   
     $menuOldPos = New-Object System.Management.Automation.Host.Coordinates(0, ($currPos.Y - ($menuLen - $oldMenuPos)))
     $menuNewPos = New-Object System.Management.Automation.Host.Coordinates(0, ($currPos.Y - ($menuLen - $menuPosition)))
     
-    $_spacer_old = $(" " * ($meta.MaxMenuWidth - $menuItems[$oldMenuPos].TitleLen))
-    $_spacer = $(" " * ($meta.MaxMenuWidth - $menuItems[$menuPosition].TitleLen))
+    $_spacer_old = $(" " * ($cfg.MaxMenuWidth - $menuItems[$oldMenuPos].TitleLen))
+    $_spacer = $(" " * ($cfg.MaxMenuWidth - $menuItems[$menuPosition].TitleLen))
 
     moveCursor $menuOldPos
     Write-Host "`t" -NoNewLine
-    Write-Host "$oldMenuPos. $($menuItems[$oldMenuPos].Title)" -fore $fcolor -back $bcolor -NoNewLine
+    Write-Host "$oldMenuPos. $($menuItems[$oldMenuPos].Title)" -fore $([Colors]::fontColor) -back $([Colors]::backColor) -NoNewLine
     if ($menuItems[$oldMenuPos].Group.length -ne 0) {
-        Write-Host "$($_spacer_old) [$($menuItems[$oldMenuPos].Group)]" -fore $gcolor -back $bcolor -NoNewLine
+        Write-Host "$($_spacer_old) [$($menuItems[$oldMenuPos].Group)]" -fore $([Colors]::groupColor) -back $([Colors]::backColor) -NoNewLine
     }
 
     moveCursor $menuNewPos
     Write-Host "`t" -NoNewLine
-    Write-Host "$menuPosition. $($menuItems[$menuPosition].Title)" -fore $bcolor -back $fcolor -NoNewLine
+    Write-Host "$menuPosition. $($menuItems[$menuPosition].Title)" -fore $([Colors]::backColor) -back $([Colors]::fontColor) -NoNewLine
     if ($menuItems[$menuPosition].Group.length -ne 0) {
-        Write-Host "$($_spacer) [$($menuItems[$menuPosition].Group)]" -fore $gcolor -back $bcolor -NoNewLine
+        Write-Host "$($_spacer) [$($menuItems[$menuPosition].Group)]" -fore $([Colors]::groupColor) -back $([Colors]::backColor) -NoNewLine
     }
 
     moveCursor $currPos
 }
 
-function DrawMenu { param ([SSHRecord[]]$menuItems, [ConfMeta] $meta, $menuPosition, $menuTitel)
-    $fcolor = $host.UI.RawUI.ForegroundColor
-    $bcolor = $host.UI.RawUI.BackgroundColor
-    $gcolor = "DarkGray"
-
+function DrawMenu { param ([Conf] $cfg, $menuPosition, $menuTitel)
+    $menuItems = $cfg.Records
     $menuwidth = $menuTitel.length + 4
-    Write-Host "`t" -NoNewLine;    Write-Host ("=" * $menuwidth) -fore $fcolor -back $bcolor
-    Write-Host "`t" -NoNewLine;    Write-Host " $menuTitel " -fore $fcolor -back $bcolor
-    Write-Host "`t" -NoNewLine;    Write-Host ("=" * $menuwidth) -fore $fcolor -back $bcolor
+    Write-Host "`t" -NoNewLine;    Write-Host ("=" * $menuwidth) -fore $([Colors]::fontColor) -back $([Colors]::backColor)
+    Write-Host "`t" -NoNewLine;    Write-Host " $menuTitel " -fore $([Colors]::fontColor) -back $([Colors]::backColor)
+    Write-Host "`t" -NoNewLine;    Write-Host ("=" * $menuwidth) -fore $([Colors]::fontColor) -back $([Colors]::backColor)
     Write-Host ""
     for ($i = 0; $i -le $menuItems.length;$i++) {
-        $_spacer = $(" " * ($meta.MaxMenuWidth - $menuItems[$i].TitleLen))
+        $_spacer = $(" " * ($cfg.MaxMenuWidth - $menuItems[$i].TitleLen))
         Write-Host "`t" -NoNewLine
         if ($i -eq $menuPosition) {
-            Write-Host "$i. $($menuItems[$i].Title)" -fore $bcolor -back $fcolor -NoNewline
+            Write-Host "$i. $($menuItems[$i].Title)" -fore $([Colors]::backColor) -back $([Colors]::fontColor) -NoNewline
             if ($menuItems[$i].Group.length -ne 0) {
-                Write-Host "$($_spacer) [$($menuItems[$i].Group)]" -fore $gcolor -back $bcolor -NoNewline
+                Write-Host "$($_spacer) [$($menuItems[$i].Group)]" -fore $([Colors]::groupColor) -back $([Colors]::backColor) -NoNewline
             }
-            Write-Host "" -fore $fcolor -back $bcolor
+            Write-Host "" -fore $([Colors]::fontColor) -back $([Colors]::backColor)
         } else {
             if ($($menuItems[$i])) {
-                Write-Host "$i. $($menuItems[$i].Title)" -fore $fcolor -back $bcolor -NoNewline
+                Write-Host "$i. $($menuItems[$i].Title)" -fore $([Colors]::fontColor) -back $([Colors]::backColor) -NoNewline
                 if ($menuItems[$i].Group.length -ne 0) {
-                    Write-Host "$($_spacer) [$($menuItems[$i].Group)]" -fore $gcolor -back $bcolor
+                    Write-Host "$($_spacer) [$($menuItems[$i].Group)]" -fore $([Colors]::groupColor) -back $([Colors]::backColor)
                 } else {
                     Write-Host ""
                 }
@@ -136,11 +131,10 @@ function DrawMenu { param ([SSHRecord[]]$menuItems, [ConfMeta] $meta, $menuPosit
     Write-Host ""
 }
 
-function Menu { param ([SSHRecord[]]$menuItems, [ConfMeta] $meta, $menuTitle = "MENU")
-    $vkeycode = 0
-    $pos = 0
-    $oldPos = 0
-    DrawMenu $menuItems $meta $pos $menuTitle
+function Menu { param ([Conf] $cfg, $menuTitle = "MENU")
+    $vkeycode = 0; $pos = 0; $oldPos = 0
+    $menuItems = $cfg.Records
+    DrawMenu $cfg $pos $menuTitle
     $currPos=$host.UI.RawUI.CursorPosition
     While ($vkeycode -ne 13) {
         $press = $host.ui.rawui.readkey("NoEcho,IncludeKeyDown")
@@ -158,15 +152,13 @@ function Menu { param ([SSHRecord[]]$menuItems, [ConfMeta] $meta, $menuTitle = "
         }
         if ($pos -lt 0) {$pos = 0}
         if ($pos -ge $menuItems.length) {$pos = $menuItems.length -1}
-        RedrawMenuItems $menuItems $meta $oldPos $pos $currPos
+        RedrawMenuItems $cfg $oldPos $pos $currPos
     }
     Write-Output $pos
 }
 
-$meta, $cfg = loadConfig($scriptPath)
-$records = $cfg.values -as [SSHRecord[]]
-$selection = Menu $records $meta ([string]::Format("Select {0} server to login", $meta.title))
-[SSHRecord]$record = $cfg[$selection]
+$cfg = loadConfig($scriptPath)
+[SSHRecord]$record = $cfg.Records[$(Menu $cfg ([string]::Format("Select {0} server to login", $cfg.title)))]
 
 $ssh_args = [System.Collections.ArrayList]@()
 [void]$ssh_args.AddRange(@("-o", "StrictHostKeyChecking=no", $record._host))
