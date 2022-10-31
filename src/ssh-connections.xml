@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <SSHRecords title="My Connections">
     <!-- Password protected keys could be automated  via custom SSH_ASKPASS-->
-    <record title="Connection 1"  user="" _host="" port="22" keyPath="">
+    <record title="Connection 1" group="TEST" user="" _host="" port="22" keyPath="">
         <env name="SSH_KEY_PASS" value="my_strong_pass"/>
         <env name="SSH_ASKPASS" value="path_to/pass.exe"/>
         <env name="SSH_ASKPASS_REQUIRE" value="force"/>
         <env name="DISPLAY" value=":0.0"/>
     </record>
     <!-- Normal record -->
-    <record title="Connection 2"  user=""  _host="" port="22" keyPath=""/>
+    <record title="Connection 2" group="LOCAL" user=""  _host="" port="22" keyPath=""/>
 </SSHRecords>
