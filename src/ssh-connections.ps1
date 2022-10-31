@@ -88,12 +88,16 @@ function RedrawMenuItems{
     moveCursor $menuOldPos
     Write-Host "`t" -NoNewLine
     Write-Host "$oldMenuPos. $($menuItems[$oldMenuPos].Title)" -fore $fcolor -back $bcolor -NoNewLine
-    Write-Host "$($_spacer_old) [$($menuItems[$oldMenuPos].Group)]" -fore $gcolor -back $bcolor -NoNewLine
+    if ($menuItems[$oldMenuPos].Group.length -ne 0) {
+        Write-Host "$($_spacer_old) [$($menuItems[$oldMenuPos].Group)]" -fore $gcolor -back $bcolor -NoNewLine
+    }
 
     moveCursor $menuNewPos
     Write-Host "`t" -NoNewLine
     Write-Host "$menuPosition. $($menuItems[$menuPosition].Title)" -fore $bcolor -back $fcolor -NoNewLine
-    Write-Host "$($_spacer) [$($menuItems[$menuPosition].Group)]" -fore $bcolor -back $fcolor -NoNewLine
+    if ($menuItems[$menuPosition].Group.length -ne 0) {
+        Write-Host "$($_spacer) [$($menuItems[$menuPosition].Group)]" -fore $gcolor -back $bcolor -NoNewLine
+    }
 
     moveCursor $currPos
 }
@@ -113,12 +117,18 @@ function DrawMenu { param ([SSHRecord[]]$menuItems, [ConfMeta] $meta, $menuPosit
         Write-Host "`t" -NoNewLine
         if ($i -eq $menuPosition) {
             Write-Host "$i. $($menuItems[$i].Title)" -fore $bcolor -back $fcolor -NoNewline
-            Write-Host "$($_spacer) [$($menuItems[$i].Group)]" -fore $bcolor -back $fcolor -NoNewline
+            if ($menuItems[$i].Group.length -ne 0) {
+                Write-Host "$($_spacer) [$($menuItems[$i].Group)]" -fore $gcolor -back $bcolor -NoNewline
+            }
             Write-Host "" -fore $fcolor -back $bcolor
         } else {
             if ($($menuItems[$i])) {
                 Write-Host "$i. $($menuItems[$i].Title)" -fore $fcolor -back $bcolor -NoNewline
-                Write-Host "$($_spacer) [$($menuItems[$i].Group)]" -fore $gcolor -back $bcolor
+                if ($menuItems[$i].Group.length -ne 0) {
+                    Write-Host "$($_spacer) [$($menuItems[$i].Group)]" -fore $gcolor -back $bcolor
+                } else {
+                    Write-Host ""
+                }
             } 
         }
     }
