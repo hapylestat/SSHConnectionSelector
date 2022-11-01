@@ -55,6 +55,17 @@ class SSHRecord {
             $Title, $User, $Group, $_Host, $Port, $keyPath, $_Env
         $this.TitleLen = $Title.Length
     }
+
+    [System.Collections.ArrayList] buildArgs(){
+        $ssh_args = [System.Collections.ArrayList]@()
+        [void]$ssh_args.AddRange(@("-o", "StrictHostKeyChecking=no", $this._Host))
+        
+        if ($this.Port -ne "") { [void]$ssh_args.AddRange(@("-p", $this.Port)) }
+        if ($this.User -ne "") { [void]$ssh_args.AddRange(@("-l", $this.User)) }
+        if ($this.keyPath -ne "") { [void]$ssh_args.AddRange(@("-i", $this.keyPath)) }
+
+        return $ssh_args
+    }
 }
 
 class Conf {
@@ -118,11 +129,11 @@ function RedrawMenuItems{
     moveCursor $currPos
 }
 
-function DrawMenu { param ([Conf] $cfg, $menuPosition, $menuTitel)
+function DrawMenu { param ([Conf] $cfg, $menuPosition, $menuTitle)
     $menuItems = $cfg.Records
-    $menuwidth = $menuTitel.length + 4
+    $menuwidth = $menuTitle.length + 4
     Write-Host "`t" -NoNewLine;    Write-Host ("=" * $menuwidth) -fore $([Colors]::fontColor) -back $([Colors]::backColor)
-    Write-Host "`t" -NoNewLine;    Write-Host " $menuTitel " -fore $([Colors]::fontColor) -back $([Colors]::backColor)
+    Write-Host "`t" -NoNewLine;    Write-Host " $menuTitle " -fore $([Colors]::fontColor) -back $([Colors]::backColor)
     Write-Host "`t" -NoNewLine;    Write-Host ("=" * $menuwidth) -fore $([Colors]::fontColor) -back $([Colors]::backColor)
     Write-Host ""
     for ($i = 0; $i -le $menuItems.length;$i++) {
@@ -178,16 +189,6 @@ function Menu { param ([Conf] $cfg, $menuTitle = "MENU")
 $cfg = loadConfig($scriptPath)
 [SSHRecord]$record = $cfg.Records[$(Menu $cfg ([string]::Format("Select {0} server to login", $cfg.title)))]
 
-$ssh_args = [System.Collections.ArrayList]@()
-[void]$ssh_args.AddRange(@("-o", "StrictHostKeyChecking=no", $record._host))
-
-if ($record.port -ne "") { [void]$ssh_args.AddRange(@("-p", $record.port)) }
-if ($record.user -ne "") { [void]$ssh_args.AddRange(@("-l", $record.user)) }
-if ($record.keyPath -ne "") { [void]$ssh_args.AddRange(@("-i", $record.keyPath)) }
-
-
 [EnvVar]::setVars($record._Env)
-
-& ssh $ssh_args
-
+& ssh $record.buildArgs()
 [EnvVar]::clearVars($record._Env)
