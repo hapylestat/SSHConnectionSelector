@@ -1,4 +1,3 @@
-
 #!/usr/bin/env powershell
 
 $scriptPath = split-path -parent $MyInvocation.MyCommand.Definition
@@ -24,6 +23,25 @@ class EnvVar {
             [void]$vars.Add([EnvVar]::new($_env.name, $_env.value))
         }
         return $vars
+    }
+
+    static [void] setVars([EnvVar[]] $variables) {
+        foreach($var in $variables) {
+            $_name = $var.Name
+            if (Test-Path env:$_name) {
+                Remove-Item env:$_name | out-null
+            }
+            New-Item env:$_name -Value $var.Value | out-null
+        }
+    }
+
+    static [void] clearVars([EnvVar[]] $variables) {
+        foreach($var in $variables) {
+            $_name = $var.Name
+            if (Test-Path env:$_name) {
+                Remove-Item env:$_name | out-null
+            }
+        }
     }
 }
 
@@ -167,19 +185,9 @@ if ($record.port -ne "") { [void]$ssh_args.AddRange(@("-p", $record.port)) }
 if ($record.user -ne "") { [void]$ssh_args.AddRange(@("-l", $record.user)) }
 if ($record.keyPath -ne "") { [void]$ssh_args.AddRange(@("-i", $record.keyPath)) }
 
-foreach($var in $record._Env) {
-    $_name = $var.Name
-    if (Test-Path env:$_name) {
-        Remove-Item env:$_name | out-null
-    }
-    New-Item env:$_name -Value $var.Value | out-null
-}
+
+[EnvVar]::setVars($record._Env)
 
 & ssh $ssh_args
 
-foreach($var in $record._Env) {
-    $_name = $var.Name
-    if (Test-Path env:$_name) {
-        Remove-Item env:$_name | out-null
-    }
-}
+[EnvVar]::clearVars($record._Env)
