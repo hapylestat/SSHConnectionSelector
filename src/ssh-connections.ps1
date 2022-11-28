@@ -92,7 +92,7 @@ class SSHRecord {
         if ($this._Forwards.Count -gt 0) {
             Write-Host "========= Port Forward List ==========="
             foreach ($forward in $this._Forwards) {
-                Write-Host "[INFO] Forwarding $($forward.RemoteIP):$($forward.RemoteIP) => localhost:$($forward.LocalPort)"
+                Write-Host "[INFO] Forwarding $($forward.RemoteIP):$($forward.RemotePort) => localhost:$($forward.LocalPort)"
                 [void]$ssh_args.AddRange($forward.toArgs());
             }
             Write-Host "======================================="
