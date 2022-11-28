@@ -6,6 +6,9 @@
         <env name="SSH_ASKPASS" value="path_to/pass.exe"/>
         <env name="SSH_ASKPASS_REQUIRE" value="force"/>
         <env name="DISPLAY" value=":0.0"/>
+
+        <!-- Forward remote IP:PORT to local PORT -->
+        <forward remote-ip="" remote-port="80" local-port="80"/>
     </record>
     <!-- Normal record -->
     <record title="Connection 2" group="LOCAL" user=""  _host="" port="22" keyPath=""/>

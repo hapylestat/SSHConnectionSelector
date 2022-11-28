@@ -45,14 +45,39 @@ class EnvVar {
     }
 }
 
+class SSHPortForward {
+    [string] $RemoteIP; [string] $RemotePort; [string] $LocalPort;
+
+    SSHPortForward([string] $RemoteIP, [string] $RemotePort, [string] $LocalPort) {
+        $this.LocalPort = $LocalPort;
+        $this.RemoteIP = $RemoteIP;
+        $this.RemotePort = $RemotePort;
+    }
+
+
+    static [SSHPortForward[]] parse([Array] $_forwards) {
+        $forwards = [System.Collections.ArrayList]@()
+        foreach($forward in $_forwards) {
+            [void]$forwards.Add([SSHPortForward]::new($forward.'remote-ip', $forward.'remote-port', $forward.'local-port'));
+        }
+        return $forwards
+    }
+
+    [System.Array] toArgs(){
+        return @("-L", "$($this.LocalPort):$($this.RemoteIP):$($this.RemotePort)") 
+    }
+
+}
+
 class SSHRecord {
     [string] $Title; [string] $Group; [string] $User; [string] $_Host; [string] $Port; [string] $keyPath
     [int] $TitleLen
     [System.Array] $_Env
+    [System.Array] $_Forwards
     
-    SSHRecord([string] $Title, [string] $User, [string] $Group, [string] $_Host, [string] $Port, [string] $keyPath, [System.Array] $_Env) {
-        $this.Title, $this.User, $this.Group, $this._Host, $this.Port, $this.keyPath, $this._Env =
-            $Title, $User, $Group, $_Host, $Port, $keyPath, $_Env
+    SSHRecord([string] $Title, [string] $User, [string] $Group, [string] $_Host, [string] $Port, [string] $keyPath, [System.Array] $_Env, [System.Array] $_Forwards) {
+        $this.Title, $this.User, $this.Group, $this._Host, $this.Port, $this.keyPath, $this._Env, $this._Forwards =
+            $Title, $User, $Group, $_Host, $Port, $keyPath, $_Env, $_Forwards
         $this.TitleLen = $Title.Length
     }
 
@@ -63,6 +88,15 @@ class SSHRecord {
         if ($this.Port -ne "") { [void]$ssh_args.AddRange(@("-p", $this.Port)) }
         if ($this.User -ne "") { [void]$ssh_args.AddRange(@("-l", $this.User)) }
         if ($this.keyPath -ne "") { [void]$ssh_args.AddRange(@("-i", $this.keyPath)) }
+        
+        if ($this._Forwards.Count -gt 0) {
+            Write-Host "========= Port Forward List ==========="
+            foreach ($forward in $this._Forwards) {
+                Write-Host "[INFO] Forwarding $($forward.RemoteIP):$($forward.RemoteIP) => localhost:$($forward.LocalPort)"
+                [void]$ssh_args.AddRange($forward.toArgs());
+            }
+            Write-Host "======================================="
+        }
 
         return $ssh_args
     }
@@ -83,9 +117,9 @@ class Conf {
         $sshRecords = [System.Collections.ArrayList]@()
         $counters = @(0, 0)  # index, menu_len, group_len
         foreach ($record in $records) {
-            $sshRecords.Add([SSHRecord]::new($record.title, $record.user, $record.group, $record._host, $record.port, $record.keyPath, [EnvVar]::parse($record.env)))
-            if ($record.title.length -gt $counters[0]++) { $counters[0] = $record.title.length }
-            if ($record.group.length -gt $counters[1]++){ $counters[1] = $record.group.length}
+            $sshRecords.Add([SSHRecord]::new($record.title, $record.user, $record.group, $record._host, $record.port, $record.keyPath, [EnvVar]::parse($record.env), [SSHPortForward]::parse($record.forward)))
+            if ($record.title.length -gt $counters[0]++){ $counters[0] = $record.title.length }
+            if ($record.group.length -gt $counters[1]++){ $counters[1] = $record.group.length }
         }
         return [Conf]::new($Title, $counters[0], $counters[1], $sshRecords)
     }
