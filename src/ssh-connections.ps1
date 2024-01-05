@@ -8,6 +8,7 @@ class Colors {
     static [string] $fontColor = $host.UI.RawUI.ForegroundColor
     static [string] $backColor = $host.UI.RawUI.BackgroundColor
     static [string] $groupColor = "Magenta"   
+    static [string] $notOnlineColor = "Red"
 }
 
 class EnvVar {
@@ -45,58 +46,49 @@ class EnvVar {
     }
 }
 
-class SSHPortForward {
-    [string] $RemoteIP; [string] $RemotePort; [string] $LocalPort;
-
-    SSHPortForward([string] $RemoteIP, [string] $RemotePort, [string] $LocalPort) {
-        $this.LocalPort = $LocalPort;
-        $this.RemoteIP = $RemoteIP;
-        $this.RemotePort = $RemotePort;
-    }
-
-
-    static [SSHPortForward[]] parse([Array] $_forwards) {
-        $forwards = [System.Collections.ArrayList]@()
-        foreach($forward in $_forwards) {
-            [void]$forwards.Add([SSHPortForward]::new($forward.'remote-ip', $forward.'remote-port', $forward.'local-port'));
-        }
-        return $forwards
-    }
-
-    [System.Array] toArgs(){
-        return @("-L", "$($this.LocalPort):$($this.RemoteIP):$($this.RemotePort)") 
-    }
-
-}
-
 class SSHRecord {
     [string] $Title; [string] $Group; [string] $User; [string] $_Host; [string] $Port; [string] $keyPath
     [int] $TitleLen
     [System.Array] $_Env
-    [System.Array] $_Forwards
+
+    hidden [bool] $__isReachable = $null
+    hidden [bool] $__J1_received = $false
+    hidden [object] $isReachableAsync = $null
     
-    SSHRecord([string] $Title, [string] $User, [string] $Group, [string] $_Host, [string] $Port, [string] $keyPath, [System.Array] $_Env, [System.Array] $_Forwards) {
-        $this.Title, $this.User, $this.Group, $this._Host, $this.Port, $this.keyPath, $this._Env, $this._Forwards =
-            $Title, $User, $Group, $_Host, $Port, $keyPath, $_Env, $_Forwards
+    SSHRecord([string] $Title, [string] $User, [string] $Group, [string] $_Host, [string] $Port, [string] $keyPath, [System.Array] $_Env) {
+        $this.Title, $this.User, $this.Group, $this._Host, $this.Port, $this.keyPath, $this._Env =
+            $Title, $User, $Group, $_Host, $Port, $keyPath, $_Env
         $this.TitleLen = $Title.Length
+        
+        $this.isReachableAsync = Start-Job -ScriptBlock {
+            Test-Connection -ComputerName $args[0] -TimeoutSeconds 1 -Count 1
+        }  -ArgumentList $_Host
     }
 
+    [bool] GetIsReachable(){
+        if (! $this.__J1_received) {
+            $job = Receive-Job $this.isReachableAsync -Wait -AutoRemoveJob
+            $this.__isReachable = $job[$job.Length-1].Status -eq  [System.Net.NetworkInformation.IPStatus]::Success
+            $this.__J1_received = $true
+        }
+        return $this.__isReachable
+    }
+    
     [System.Collections.ArrayList] buildArgs(){
         $ssh_args = [System.Collections.ArrayList]@()
-        [void]$ssh_args.AddRange(@("-o", "StrictHostKeyChecking=no", $this._Host))
+        $os = $env:os
+        if ($os -eq "Windows_NT") {
+         [void]$ssh_args.AddRange(@("-o", "UserKnownHostsFile=NUL"))
+        } else {
+          [void]$ssh_args.AddRange(@("-o", "UserKnownHostsFile=/dev/null"))
+        }
+        
+        
+        [void]$ssh_args.AddRange(@("-o", "StrictHostKeyChecking=no", $this._Host))       
         
         if ($this.Port -ne "") { [void]$ssh_args.AddRange(@("-p", $this.Port)) }
         if ($this.User -ne "") { [void]$ssh_args.AddRange(@("-l", $this.User)) }
         if ($this.keyPath -ne "") { [void]$ssh_args.AddRange(@("-i", $this.keyPath)) }
-        
-        if ($this._Forwards.Count -gt 0) {
-            Write-Host "========= Port Forward List ==========="
-            foreach ($forward in $this._Forwards) {
-                Write-Host "[INFO] Forwarding $($forward.RemoteIP):$($forward.RemotePort) => localhost:$($forward.LocalPort)"
-                [void]$ssh_args.AddRange($forward.toArgs());
-            }
-            Write-Host "======================================="
-        }
 
         return $ssh_args
     }
@@ -117,9 +109,9 @@ class Conf {
         $sshRecords = [System.Collections.ArrayList]@()
         $counters = @(0, 0)  # index, menu_len, group_len
         foreach ($record in $records) {
-            $sshRecords.Add([SSHRecord]::new($record.title, $record.user, $record.group, $record._host, $record.port, $record.keyPath, [EnvVar]::parse($record.env), [SSHPortForward]::parse($record.forward)))
-            if ($record.title.length -gt $counters[0]++){ $counters[0] = $record.title.length }
-            if ($record.group.length -gt $counters[1]++){ $counters[1] = $record.group.length }
+            $sshRecords.Add([SSHRecord]::new($record.title, $record.user, $record.group, $record._host, $record.port, $record.keyPath, [EnvVar]::parse($record.env)))
+            if ($record.title.length -gt $counters[0]++) { $counters[0] = $record.title.length }
+            if ($record.group.length -gt $counters[1]++){ $counters[1] = $record.group.length}
         }
         return [Conf]::new($Title, $counters[0], $counters[1], $sshRecords)
     }
@@ -148,14 +140,14 @@ function RedrawMenuItems{
 
     moveCursor $menuOldPos
     Write-Host "`t" -NoNewLine
-    Write-Host "$oldMenuPos. $($menuItems[$oldMenuPos].Title)" -fore $([Colors]::fontColor) -back $([Colors]::backColor) -NoNewLine
+    Write-Host "$oldMenuPos. $($menuItems[$oldMenuPos].Title)" -fore $($menuItems[$oldMenuPos].GetIsReachable() ? [Colors]::fontColor : [Colors]::notOnlineColor) -back $([Colors]::backColor) -NoNewLine
     if ($menuItems[$oldMenuPos].Group.length -ne 0) {
         Write-Host "$($_spacer_old) [$($menuItems[$oldMenuPos].Group)]" -fore $([Colors]::groupColor) -back $([Colors]::backColor) -NoNewLine
     }
 
     moveCursor $menuNewPos
     Write-Host "`t" -NoNewLine
-    Write-Host "$menuPosition. $($menuItems[$menuPosition].Title)" -fore $([Colors]::backColor) -back $([Colors]::fontColor) -NoNewLine
+    Write-Host "$menuPosition. $($menuItems[$menuPosition].Title)" -fore $([Colors]::backColor) -back $($menuItems[$menuPosition].GetIsReachable() ? [Colors]::fontColor : [Colors]::notOnlineColor) -NoNewLine
     if ($menuItems[$menuPosition].Group.length -ne 0) {
         Write-Host "$($_spacer) [$($menuItems[$menuPosition].Group)]" -fore $([Colors]::groupColor) -back $([Colors]::backColor) -NoNewLine
     }
@@ -170,20 +162,21 @@ function DrawMenu { param ([Conf] $cfg, $menuPosition, $menuTitle)
     Write-Host "`t" -NoNewLine;    Write-Host " $menuTitle " -fore $([Colors]::fontColor) -back $([Colors]::backColor)
     Write-Host "`t" -NoNewLine;    Write-Host ("=" * $menuwidth) -fore $([Colors]::fontColor) -back $([Colors]::backColor)
     Write-Host ""
-    for ($i = 0; $i -le $menuItems.length;$i++) {
-        $_spacer = $(" " * ($cfg.MaxMenuWidth - $menuItems[$i].TitleLen))
+    for ($i = 0;$i -le $menuItems.length;$i++) {
+        $menuItem = $menuItems[$i]
+        $_spacer = $(" " * ($cfg.MaxMenuWidth - $menuItem.TitleLen))
         Write-Host "`t" -NoNewLine
         if ($i -eq $menuPosition) {
-            Write-Host "$i. $($menuItems[$i].Title)" -fore $([Colors]::backColor) -back $([Colors]::fontColor) -NoNewline
-            if ($menuItems[$i].Group.length -ne 0) {
-                Write-Host "$($_spacer) [$($menuItems[$i].Group)]" -fore $([Colors]::groupColor) -back $([Colors]::backColor) -NoNewline
+            Write-Host "$i. $($menuItem.Title)" -fore $( $menuItem.GetIsReachable() ? [Colors]::backColor : [Colors]::notOnlineColor) -back $([Colors]::fontColor) -NoNewline
+            if ($menuItem.Group.length -ne 0) {
+                Write-Host "$($_spacer) [$($menuItem.Group)]" -fore $([Colors]::groupColor) -back $([Colors]::backColor) -NoNewline
             }
             Write-Host "" -fore $([Colors]::fontColor) -back $([Colors]::backColor)
         } else {
-            if ($($menuItems[$i])) {
-                Write-Host "$i. $($menuItems[$i].Title)" -fore $([Colors]::fontColor) -back $([Colors]::backColor) -NoNewline
-                if ($menuItems[$i].Group.length -ne 0) {
-                    Write-Host "$($_spacer) [$($menuItems[$i].Group)]" -fore $([Colors]::groupColor) -back $([Colors]::backColor)
+            if ($($menuItem)) {
+                Write-Host "$i. $($menuItem.Title)" -fore $($menuItem.GetIsReachable() ? [Colors]::fontColor : [Colors]::notOnlineColor) -back $([Colors]::backColor) -NoNewline
+                if ($menuItem.Group.length -ne 0) {
+                    Write-Host "$($_spacer) [$($menuItem.Group)]" -fore $([Colors]::groupColor) -back $([Colors]::backColor)
                 } else {
                     Write-Host ""
                 }
@@ -221,6 +214,7 @@ function Menu { param ([Conf] $cfg, $menuTitle = "MENU")
 }
 
 $cfg = loadConfig($scriptPath)
+Start-Sleep -Seconds 1 
 [SSHRecord]$record = $cfg.Records[$(Menu $cfg ([string]::Format("Select {0} server to login", $cfg.title)))]
 
 [EnvVar]::setVars($record._Env)
